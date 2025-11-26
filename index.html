@@ -79,7 +79,7 @@
             margin-right: 5px;
         }
 
-        /* ★ ユーザー情報セクションを非表示にする ★ */
+        /* ユーザー情報セクションを非表示 */
         .user-info {
             display: none;
         }
@@ -97,8 +97,8 @@
 
         /* --- 震度・津波の色の凡例 (サイドバー用) --- */
         .intensity-1 { color: blue; }
-        .intensity-2 { color: green; } /* 黄緑は見にくいため緑に変更 */
-        .intensity-3 { color: #E6A200; } /* 黄色 */
+        .intensity-2 { color: green; }
+        .intensity-3 { color: #E6A200; }
         .intensity-4 { color: orange; }
         .intensity-5-weak { color: red; font-weight: bold; }
         .intensity-5-strong { color: red; font-weight: bold; }
@@ -117,7 +117,6 @@
             text-align: center;
             line-height: 24px;
         }
-
     </style>
 </head>
 <body>
@@ -141,28 +140,21 @@
                 <div><strong>発生時刻:</strong> <span id="earthquake-time">---</span></div>
                 
                 <h4>各地の震度 (市区町村)</h4>
-                <ul id="intensity-details">
-                    </ul>
+                <ul id="intensity-details"></ul>
                 
                 <h4 style="margin-top: 20px;">津波情報</h4>
                 <div id="tsunami-warning">---</div>
-                <ul id="tsunami-details">
-                    </ul>
+                <ul id="tsunami-details"></ul>
             </div>
 
             <div id="recent-info" class="info-section">
                 <h3>待機中</h3>
                 <p>地震・津波情報を待機しています...</p>
                 <p>（直近の地震履歴はここに表示されます）</p>
-                <ul id="recent-list">
-                    </ul>
+                <ul id="recent-list"></ul>
             </div>
 
-            <div class="user-info">
-                <h4>あなたの情報</h4>
-                <div>場所: <span id="user-location">（非表示）</span></div>
-                <div>名前: <span id="user-name">（非表示）</span></div>
-            </div>
+            <div class="user-info"></div>
         </aside>
     </div>
 
@@ -176,12 +168,11 @@
         document.addEventListener('DOMContentLoaded', function() {
 
             // --- 1. 地図の初期化 (Leaflet.js) ---
-            const map = L.map('map').setView([36.2048, 138.2529], 5); // 日本中心
+            const map = L.map('map').setView([36.2048, 138.2529], 5);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             }).addTo(map);
 
-            // 地震情報（震源地マーカー）を保持するレイヤーグループ
             const earthquakeLayer = L.layerGroup().addTo(map);
 
             // --- 2. DOM要素の取得 ---
@@ -198,6 +189,9 @@
             const tsunamiWarningEl = document.getElementById('tsunami-warning');
             const tsunamiDetailsEl = document.getElementById('tsunami-details');
             const recentListEl = document.getElementById('recent-list');
+            
+            // ★ 追加: 平常時画面に戻すタイマー
+            let resetTimer = null;
 
 
             // --- 3. WebSocket (P2P地震情報 API v2) への接続 ---
@@ -213,7 +207,6 @@
                 ws.onopen = function() {
                     console.log('WebSocket接続成功！');
                     updateApiStatus('connected');
-                    // 平常時のため、直近の地震情報をリクエスト (HTTP GET)
                     fetchRecentEarthquakes();
                 };
 
@@ -225,24 +218,33 @@
                     // code: 555 = 緊急地震速報（警報）
                     
                     console.log(`[${data.code}] データ受信:`, data);
+                    let infoReceived = false;
 
                     if (data.code === 551) {
                         handleEarthquakeInfo(data);
-                        playAlertSound(); // 通知音
+                        playAlertSound();
+                        infoReceived = true;
                     } else if (data.code === 552) {
                         handleTsunamiInfo(data);
-                        playAlertSound(); // 通知音
+                        playAlertSound();
+                        infoReceived = true;
                     } else if (data.code === 555) {
-                        // 緊急地震速報（警報）の簡易処理
                         handleEEW(data);
                         playAlertSound();
+                        infoReceived = true;
+                    }
+                    
+                    // ★ 追加: 地震・津波情報を受信したらリセットタイマーを開始/更新
+                    if (infoReceived) {
+                        setResetTimer();
                     }
                 };
 
                 ws.onclose = function() {
                     console.log('WebSocket接続が切れました。5秒後に再接続します。');
                     updateApiStatus('disconnected');
-                    setTimeout(connectWebSocket, 5000); // 5秒後に再接続
+                    if (resetTimer) clearTimeout(resetTimer); // ★ 追加: タイマークリア
+                    setTimeout(connectWebSocket, 5000);
                 };
 
                 ws.onerror = function(error) {
@@ -250,6 +252,24 @@
                     updateApiStatus('disconnected');
                 };
             }
+            
+            // ★ 追加: 10分後にリロード（履歴表示に戻す）タイマー
+            function setResetTimer() {
+                // 既存のタイマーがあればクリア
+                if (resetTimer) {
+                    clearTimeout(resetTimer);
+                }
+                
+                console.log('10分後に平常時画面に戻るタイマーをセットしました。');
+                
+                // 10分後に平常時画面に戻す
+                resetTimer = setTimeout(() => {
+                    console.log('10分間情報更新がなかったため、平常時画面に戻します。');
+                    fetchRecentEarthquakes(); // これが平常時画面（履歴表示）に戻す関数
+                    earthquakeLayer.clearLayers(); // 地図のマーカーも消す
+                }, 600000); // 10分 = 10 * 60 * 1000 ms
+            }
+
 
             // --- 4. APIステータス更新関数 ---
             function updateApiStatus(status) {
@@ -268,7 +288,6 @@
             
             // --- 5. 平常時の情報取得 (HTTP GET) ---
             function fetchRecentEarthquakes() {
-                // P2P地震情報API v2 の地震履歴 (直近5件) を取得
                 const historyUrl = 'https://api.p2pquake.net/v2/history?codes=551&limit=5';
                 fetch(historyUrl)
                     .then(response => response.json())
@@ -280,7 +299,8 @@
                                 const time = new Date(quake.time).toLocaleString('ja-JP');
                                 const hypocenter = quake.earthquake.hypocenter.name;
                                 const maxScale = convertScale(quake.earthquake.maxScale);
-                                li.textContent = `${time} | ${hypocenter} | 最大震度 ${maxScale}`;
+                                // ★ 修正: 震度不明の場合に対応
+                                li.textContent = `${time} | ${hypocenter} | 最大震度 ${maxScale || '不明'}`;
                                 recentListEl.appendChild(li);
                             }
                         });
@@ -302,73 +322,66 @@
                 const eq = data.earthquake;
                 if (!eq) return;
 
-                // サイドバーの表示切り替え
                 earthquakeInfoPanel.style.display = 'block';
                 recentInfoPanel.style.display = 'none';
 
-                // サイドバーの更新
-                maxIntensityEl.textContent = `${convertScale(eq.maxScale)} ( ${convertScaleText(eq.maxScale)} )`;
-                magnitudeEl.textContent = eq.hypocenter.magnitude;
-                hypocenterEl.textContent = eq.hypocenter.name;
+                // ★ 修正: 震度情報がnullの場合に '情報なし' と表示
+                const maxScale = eq.maxScale;
+                maxIntensityEl.textContent = maxScale > 0 ? `${convertScale(maxScale)} ( ${convertScaleText(maxScale)} )` : '情報なし';
+                
+                magnitudeEl.textContent = eq.hypocenter.magnitude || '---';
+                hypocenterEl.textContent = eq.hypocenter.name || '---';
                 earthquakeTimeEl.textContent = new Date(eq.time).toLocaleString('ja-JP');
 
-                // 震度詳細リストのクリアと追加 (市区町村)
                 intensityDetailsEl.innerHTML = '';
                 if (data.points) {
-                    // 震度が高い順にソート
                     data.points.sort((a, b) => b.scale - a.scale);
                     
                     data.points.forEach(point => {
-                        if (point.scale <= 0) return; // 震度0以下は無視
+                        if (point.scale <= 0) return;
                         const li = document.createElement('li');
                         li.textContent = `[${convertScale(point.scale)}] ${point.addr}`;
-                        li.className = getIntensityClass(point.scale); // 色付け用クラス
+                        li.className = getIntensityClass(point.scale);
                         intensityDetailsEl.appendChild(li);
                     });
                 }
                 
-                // 地図上の描画をクリア
                 earthquakeLayer.clearLayers();
 
-                // 震源地を地図に描画
                 if (eq.hypocenter.latitude && eq.hypocenter.longitude) {
                     const lat = eq.hypocenter.latitude;
                     const lon = eq.hypocenter.longitude;
                     
-                    // 震源地マーカー (X印)
                     L.marker([lat, lon], {
                         icon: L.divIcon({
                             className: 'hypocenter-icon',
                             html: '❌',
                             iconSize: [24, 24],
-                            iconAnchor: [12, 12] // アイコンの中心
+                            iconAnchor: [12, 12]
                         })
                     }).addTo(earthquakeLayer)
                         .bindPopup(`震源地: ${eq.hypocenter.name}<br>M${eq.magnitude}<br>深さ: ${eq.hypocenter.depth}km`)
                         .openPopup();
                     
-                    map.setView([lat, lon], 7); // 震源地にズーム
+                    map.setView([lat, lon], 7);
                 }
-                
-                // (※ご要望の「地図上に震度を表示」は、
-                //  APIから市区町村の緯度経度が提供されないため、ここでは実装していません)
             }
 
             // [552] 津波予報
             function handleTsunamiInfo(data) {
                 console.log('津波情報処理:', data);
 
-                // サイドバーの表示切り替え
                 earthquakeInfoPanel.style.display = 'block';
                 recentInfoPanel.style.display = 'none';
                 
-                tsunamiWarningEl.innerHTML = ''; // クリア
-                tsunamiDetailsEl.innerHTML = ''; // クリア
+                tsunamiWarningEl.innerHTML = '';
+                tsunamiDetailsEl.innerHTML = '';
 
                 if (data.cancelled) {
                     tsunamiWarningEl.textContent = '津波予報は解除されました。';
                     tsunamiWarningEl.className = 'tsunami-safe';
-                    // 解除されたら、直近の地震履歴を再読み込み
+                    // ★ 追加: 解除時はタイマーをクリアし、即時履歴読み込み
+                    if (resetTimer) clearTimeout(resetTimer);
                     fetchRecentEarthquakes();
                     return;
                 }
@@ -385,20 +398,19 @@
                     const li = document.createElement('li');
                     li.textContent = `${area.name} - ${area.grade}`;
                     
-                    if (area.grade === 'MajorWarning') { // 大津波警報
+                    if (area.grade === 'MajorWarning') {
                         li.className = 'tsunami-major';
                         highestGrade = 'MajorWarning';
-                    } else if (area.grade === 'Warning') { // 津波警報
+                    } else if (area.grade === 'Warning') {
                         li.className = 'tsunami-warning';
                         if (highestGrade !== 'MajorWarning') highestGrade = 'Warning';
-                    } else if (area.grade === 'Advisory') { // 津波注意報
+                    } else if (area.grade === 'Advisory') {
                         li.className = 'tsunami-advisory';
                         if (highestGrade === 'Safe') highestGrade = 'Advisory';
                     }
                     tsunamiDetailsEl.appendChild(li);
                 });
 
-                // 一番危険な情報をトップに表示
                 if (highestGrade === 'MajorWarning') {
                     tsunamiWarningEl.textContent = '【大津波警報】';
                     tsunamiWarningEl.className = 'tsunami-major';
@@ -409,30 +421,27 @@
                     tsunamiWarningEl.textContent = '【津波注意報】';
                     tsunamiWarningEl.className = 'tsunami-advisory';
                 }
-                
-                // (※ご要望の「海岸線」「浸水予測」はAPIデータに含まれないため未実装)
             }
             
             // [555] 緊急地震速報（警報）
             function handleEEW(data) {
-                // EEWは非常に速報性が高いため、サイドバーを一時的に上書き
                 earthquakeInfoPanel.style.display = 'block';
                 recentInfoPanel.style.display = 'none';
 
-                // 既存の情報をクリア
                 intensityDetailsEl.innerHTML = '<li>緊急地震速報(警報) 受信中...</li>';
                 tsunamiDetailsEl.innerHTML = '';
                 tsunamiWarningEl.textContent = '---';
 
-                maxIntensityEl.textContent = `最大震度 ${convertScale(data.maxScale)} (予測)`;
-                magnitudeEl.textContent = data.earthquake?.magnitude || '不明';
-                hypocenterEl.textContent = data.earthquake?.hypocenter?.name || '不明';
+                // ★ 修正: 震度情報がnullの場合に '不明' と表示
+                const maxScaleEEW = data.maxScale;
+                maxIntensityEl.textContent = maxScaleEEW > 0 ? `最大震度 ${convertScale(maxScaleEEW)} (予測)` : '最大震度 不明 (予測)';
+                
+                magnitudeEl.textContent = data.earthquake?.magnitude || '---';
+                hypocenterEl.textContent = data.earthquake?.hypocenter?.name || '---';
                 earthquakeTimeEl.textContent = new Date(data.time).toLocaleString('ja-JP');
                 
-                // 地図描画をクリア
                 earthquakeLayer.clearLayers();
                 
-                // 震源地 (予測)
                 if (data.earthquake?.hypocenter) {
                     const lat = data.earthquake.hypocenter.latitude;
                     const lon = data.earthquake.hypocenter.longitude;
@@ -458,12 +467,12 @@
                 10: '1', 20: '2', 30: '3', 40: '4', 
                 45: '5弱', 50: '5強', 55: '6弱', 60: '6強', 70: '7'
             };
-            // P2P APIの震度コード (10, 20... 70) を文字に変換
             function convertScale(scale) {
+                // ★ 修正: scaleがnullや0の場合に '---' を返す
+                if (!scale || scale <= 0) return '---';
                 return scaleMap[scale] || '不明';
             }
             
-            // 震度コード (45, 50など) をCSSクラス名に変換
             function getIntensityClass(scale) {
                 const classMap = {
                     10: 'intensity-1', 20: 'intensity-2', 30: 'intensity-3', 40: 'intensity-4',
@@ -474,8 +483,9 @@
                 return classMap[scale] || '';
             }
             
-            // 震度コード (e.g., 40) をテキスト (e.g., 震度4) に変換
             function convertScaleText(scale) {
+                // ★ 修正: scaleがnullや0の場合に '---' を返す
+                if (!scale || scale <= 0) return '---';
                  const textMap = {
                     10: '震度1', 20: '震度2', 30: '震度3', 40: '震度4',
                     45: '震度5弱', 50: '震度5強', 55: '震度6弱', 60: '震度6強', 70: '震度7'
@@ -485,27 +495,22 @@
 
             // --- 8. 通知関数 ---
             function playAlertSound() {
-                // デスクトップ通知
                 if (Notification.permission === 'granted') {
                     new Notification('地震・津波情報', {
                         body: '新しい情報が発表されました。確認してください。',
-                        icon: 'https://cdn-icons-png.flaticon.com/128/1042/1042813.png' // 地震アイコンの例
+                        icon: 'https://cdn-icons-png.flaticon.com/128/1042/1042813.png'
                     });
                 } else if (Notification.permission !== 'denied') {
-                    // 許可を求める (ブラウザによってはユーザー操作時でないと要求できない)
                     Notification.requestPermission();
                 }
                 
-                // 音声再生
                 alertSound.play().catch(e => {
-                    // 自動再生がブロックされた場合
-                    console.warn('音声再生がブラウザにブロックされました。ユーザーが一度画面をクリックする必要があります。');
+                    console.warn('音声再生がブラウザにブロックされました。');
                 });
             }
             
-            // ユーザーが一度クリックしたら、音声再生を試みる (自動再生ブロック対策)
             document.body.addEventListener('click', () => {
-                alertSound.play().catch(() => {}); // 失敗しても無視
+                alertSound.play().catch(() => {});
                 alertSound.pause();
                 alertSound.currentTime = 0;
             }, { once: true });
