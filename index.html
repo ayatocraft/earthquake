@@ -212,12 +212,12 @@
 
             let resetTimer = null;
 
-            // 状態管理 (通知の重複防止・更新検知用)
+            // 状態管理
             let lastNotifiedInfo = {
-                eewId: null,      // 最後に通知したEEWのID
-                maxScale: 0,      // 最後に通知した最大震度
-                tsunamiGrade: 'Safe', // 最後に通知した津波レベル
-                isEEWActive: false // EEWが発令中か
+                eewId: null,
+                maxScale: 0,
+                tsunamiGrade: 'Safe',
+                isEEWActive: false
             };
 
 
@@ -244,19 +244,18 @@
                     if (data.training) {
                         console.log('訓練情報を受信:', data);
                         showStatusMessage('訓練情報を受信しました。', 'training');
-                        return; // 訓練情報は処理中断
+                        return;
                     }
                     if (data.code === 9611) { // EEW取り消し
                         console.log('EEW取り消し報 受信');
                         showStatusMessage('緊急地震速報は取り消されました。', 'error');
-                        lastNotifiedInfo.isEEWActive = false; // EEW解除
+                        lastNotifiedInfo.isEEWActive = false;
                         setResetTimer();
                         return;
                     }
-                    if (data.code === 552 && data.cancelled) { // 津波予報解除
+                    if (data.code === 552 && data.cancelled) {
                          console.log('津波予報解除 受信');
                     } else {
-                        // 有効な情報ならステータスメッセージを隠す
                         hideStatusMessage();
                     }
 
@@ -264,16 +263,19 @@
                     let infoReceived = false;
 
                     if (data.code === 551) { // 地震情報
-                        handleEarthquakeInfo(data);
-                        infoReceived = true;
+                        if (handleEarthquakeInfo(data)) {
+                            infoReceived = true;
+                        }
                     
                     } else if (data.code === 552) { // 津波予報
-                        handleTsunamiInfo(data);
-                        infoReceived = true;
+                        if (handleTsunamiInfo(data)) {
+                             infoReceived = true;
+                        }
                     
                     } else if (data.code === 556) { // EEW(警報)
-                        handleEEW(data);
-                        infoReceived = true;
+                        if (handleEEW(data)) {
+                             infoReceived = true;
+                        }
                     }
                     
                     if (infoReceived) {
@@ -299,9 +301,6 @@
                 if (resetTimer) {
                     clearTimeout(resetTimer);
                 }
-                
-                console.log('10分後に平常時画面に戻るタイマーをセットしました。');
-                
                 resetTimer = setTimeout(() => {
                     console.log('10分間情報更新がなかったため、平常時画面に戻します。');
                     fetchRecentEarthquakes(); 
@@ -316,7 +315,7 @@
             // 誤報/ステータスメッセージ表示
             function showStatusMessage(message, type = 'error') {
                 statusMessageEl.textContent = message;
-                statusMessageEl.className = type; // 'error' or 'training'
+                statusMessageEl.className = type;
                 statusMessageEl.style.display = 'block';
             }
             function hideStatusMessage() {
@@ -344,7 +343,7 @@
                 fetch(historyUrl)
                     .then(response => response.json())
                     .then(data => {
-                        recentListEl.innerHTML = ''; // リストをクリア
+                        recentListEl.innerHTML = '';
                         data.forEach(quake => {
                             if (quake.earthquake) {
                                 const li = document.createElement('li');
@@ -367,20 +366,28 @@
             // --- 6. データ処理関数 ---
 
             // [551] 地震情報（震源・震度）
+            // (変更) 処理を実行したら true を、スキップしたら false を返す
             function handleEarthquakeInfo(data) {
                 console.log('地震情報処理:', data);
                 const eq = data.earthquake;
 
-                // ★★★ Feature 1: 不明情報のバグ対策 ★★★
-                // 必須のデータ(earthquakeオブジェクト, 震源情報, 時刻)が無ければ処理しない
-                if (!eq || !eq.hypocenter || !eq.time) {
-                    console.warn('[551] 不完全なデータのためスキップ:', data);
-                    return; // 処理を中断
+                // 必須のデータ(earthquakeオブジェクト, 時刻)が無ければ処理しない
+                if (!eq || !eq.time) {
+                    console.warn('[551] 必須データ(eq or time)が欠落。スキップ:', data);
+                    return false; // 処理中断
                 }
-                // 震度も震源地も不明(null or 0 or空文字)な場合もスキップ
-                if ((!eq.maxScale || eq.maxScale <= 0) && !eq.hypocenter.name) {
-                    console.warn('[551] 震度・震源地ともに不明のためスキップ:', data);
-                    return; // 処理を中断
+
+                // ★★★ ユーザー要望: 時間以外がnull(不明)ならスキップ ★★★
+                const maxScale = eq.maxScale || 0;
+                const magnitude = eq.hypocenter?.magnitude || 0;
+                const hypoName = eq.hypocenter?.name || "";
+                const hypoLat = eq.hypocenter?.latitude || 0;
+                const points = data.points || [];
+
+                // 震度、M、震源地名、緯度、震度詳細のすべてが不明(0, "", [])の場合
+                if (maxScale <= 0 && magnitude <= 0 && hypoName === "" && hypoLat === 0 && points.length === 0) {
+                    console.warn('[551] 時間以外の主要情報がすべて不明のためスキップ:', data);
+                    return false; // 処理中断
                 }
                 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
@@ -392,39 +399,32 @@
                     );
                 }
                 
-                // EEWが終了したとみなし、状態をリセット
                 lastNotifiedInfo.isEEWActive = false;
                 
                 // --- 画面表示 ---
                 earthquakeInfoPanel.style.display = 'block';
                 recentInfoPanel.style.display = 'none';
-
-                const maxScale = eq.maxScale;
-                maxIntensityEl.textContent = maxScale > 0 ? `${convertScale(maxScale)} ( ${convertScaleText(maxScale)} )` : '情報なし';
                 
+                maxIntensityEl.textContent = maxScale > 0 ? `${convertScale(maxScale)} ( ${convertScaleText(maxScale)} )` : '情報なし';
                 magnitudeEl.textContent = eq.hypocenter.magnitude || '---';
                 hypocenterEl.textContent = eq.hypocenter.name || '---';
                 earthquakeTimeEl.textContent = new Date(eq.time).toLocaleString('ja-JP');
 
-                // ★★★ Feature 3: 市町村ごとの震度表示 ★★★
+                // 市町村ごとの震度表示
                 intensityDetailsEl.innerHTML = '';
                 if (data.points) {
-                    // 震度順にソート
                     data.points.sort((a, b) => b.scale - a.scale);
-                    
                     data.points.forEach(point => {
-                        if (point.scale <= 0) return; // 震度0以下は非表示
+                        if (point.scale <= 0) return;
                         const li = document.createElement('li');
                         li.textContent = `[${convertScale(point.scale)}] ${point.addr}`;
                         li.className = getIntensityClass(point.scale);
                         intensityDetailsEl.appendChild(li);
                     });
                 }
-                // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
                 
+                // 震源地をバツマークで表示
                 earthquakeLayer.clearLayers();
-
-                // ★★★ Feature 2: 震源地をバツマークで表示 ★★★
                 if (eq.hypocenter.latitude && eq.hypocenter.longitude) {
                     const lat = eq.hypocenter.latitude;
                     const lon = eq.hypocenter.longitude;
@@ -442,10 +442,12 @@
                     
                     map.setView([lat, lon], 7);
                 }
-                // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+                
+                return true; // 処理実行
             }
 
             // [552] 津波予報
+            // (変更) 処理を実行したら true を、スキップしたら false を返す
             function handleTsunamiInfo(data) {
                 console.log('津波情報処理:', data);
 
@@ -512,17 +514,32 @@
                     sendNotification(notificationTitle, notificationBody);
                     lastNotifiedInfo.tsunamiGrade = highestGrade;
                 }
+                
+                return true; // 処理実行
             }
             
             // [556] 緊急地震速報（警報）
+            // (変更) 処理を実行したら true を、スキップしたら false を返す
             function handleEEW(data) {
                 console.log('EEW(警報)処理:', data);
 
-                // ★★★ Feature 1: 不明情報のバグ対策 ★★★
-                // report_id (ID) または time (時刻) がないEEWは無効
+                // 必須のデータ(report_id, time) がないEEWは無効
                 if (!data.report_id || !data.time) {
-                    console.warn('[556] 不完全なEEWデータのためスキップ:', data);
-                    return; // 処理を中断
+                    console.warn('[556] 必須データ(id or time)が欠落。スキップ:', data);
+                    return false; // 処理中断
+                }
+
+                // ★★★ ユーザー要望: 時間以外がnull(不明)ならスキップ ★★★
+                const maxScaleEEW = data.maxScale || 0;
+                const magnitude = data.earthquake?.magnitude || 0;
+                const hypoName = data.earthquake?.hypocenter?.name || "";
+                const hypoLat = data.earthquake?.hypocenter?.latitude || 0;
+                const tsunamiInfo = data.earthquake?.tsunami || "None";
+
+                // 震度、M、震源地名、緯度、津波情報のすべてが不明(0, "", 0, "None")の場合
+                if (maxScaleEEW <= 0 && magnitude <= 0 && hypoName === "" && hypoLat === 0 && tsunamiInfo === "None") {
+                     console.warn('[556] 時間以外の主要情報がすべて不明のためスキップ:', data);
+                     return false; // 処理中断
                 }
                 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
@@ -531,19 +548,17 @@
                 recentInfoPanel.style.display = 'none';
                 intensityDetailsEl.innerHTML = `<li>緊急地震速報(警報) 第${data.report_num || '？'}報 受信中...</li>`;
                 
-                const maxScaleEEW = data.maxScale;
-                const tsunamiInfo = data.earthquake?.tsunami;
+                const tsunamiInfoDisplay = data.earthquake?.tsunami;
                 
-                // --- 画面表示の更新 ---
                 maxIntensityEl.textContent = maxScaleEEW > 0 ? `最大震度 ${convertScale(maxScaleEEW)} (予測)` : '最大震度 不明 (予測)';
                 magnitudeEl.textContent = data.earthquake?.magnitude || '---';
                 hypocenterEl.textContent = data.earthquake?.hypocenter?.name || '---';
                 earthquakeTimeEl.textContent = new Date(data.time).toLocaleString('ja-JP');
 
-                if (tsunamiInfo === 'Warning') {
+                if (tsunamiInfoDisplay === 'Warning') {
                      tsunamiWarningEl.textContent = '【津波警報】(EEW)';
                      tsunamiWarningEl.className = 'tsunami-warning';
-                } else if (tsunamiInfo === 'Advisory') {
+                } else if (tsunamiInfoDisplay === 'Advisory') {
                      tsunamiWarningEl.textContent = '【津波注意報】(EEW)';
                      tsunamiWarningEl.className = 'tsunami-advisory';
                 } else {
@@ -553,7 +568,7 @@
 
                 // 地図表示 (EEWは 🚨 マーク)
                 earthquakeLayer.clearLayers();
-                if (data.earthquake?.hypocenter) {
+                if (data.earthquake?.hypocenter && data.earthquake.hypocenter.latitude) {
                     const lat = data.earthquake.hypocenter.latitude;
                     const lon = data.earthquake.hypocenter.longitude;
                     
@@ -574,7 +589,6 @@
                 // 高度な通知ロジック
                 lastNotifiedInfo.isEEWActive = true;
                 
-                // 1. 新規のEEWか？ (IDで比較)
                 if (lastNotifiedInfo.eewId !== data.report_id) {
                     console.log('新規EEW発令');
                     sendNotification(
@@ -585,7 +599,6 @@
                     lastNotifiedInfo.maxScale = maxScaleEEW;
                     lastNotifiedInfo.tsunamiGrade = tsunamiInfo || 'Safe';
                 
-                // 2. 既存EEWの更新か？ (IDが同じ)
                 } else {
                     let updateMessage = '';
                     
@@ -609,6 +622,8 @@
                         );
                     }
                 }
+                
+                return true; // 処理実行
             }
 
 
@@ -636,7 +651,7 @@
                 if (!scale || scale <= 0) return '---';
                  const textMap = {
                     10: '震度1', 20: '震度2', 30: '震度3', 40: '震度4',
-                    45: '震度5弱', 50: '震度5強', 55: '震度6弱', 60: '震度6強', 70: '震度7'
+                    45: '震度5弱', 50: '震度5強', 55: '震度6弱', 60: '6強', 70: '震度7'
                 };
                 return textMap[scale] || '不明';
             }
@@ -648,8 +663,8 @@
                 if (Notification.permission === 'granted') {
                     const options = {
                         body: body,
-                        icon: 'https://cdn-icons-png.flaticon.com/128/1042/1042813.png', // 地震アイコン
-                        tag: 'earthquake-info' // タグを指定すると通知が上書きされる
+                        icon: 'https://cdn-icons-png.flaticon.com/128/1042/1042813.png',
+                        tag: 'earthquake-info'
                     };
                     new Notification(title, options);
                 }
