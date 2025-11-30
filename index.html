@@ -10,7 +10,7 @@
      crossorigin=""/>
     
     <style>
-        /* 基本レイアウト */
+        /* 基本レイアウト (変更なし) */
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             margin: 0;
@@ -127,7 +127,7 @@
         .tsunami-warning { border-left: 5px solid red; padding-left: 5px; font-weight: bold; }
         .tsunami-major { border-left: 5px solid darkmagenta; padding-left: 5px; font-weight: bold; }
         
-        /* ★ 新規: リストの配色 (Feature 6) */
+        /* リストの配色・カーソル */
         #recent-list li {
             cursor: pointer;
             transition: background-color 0.2s;
@@ -146,9 +146,9 @@
             line-height: 24px;
         }
         
-        /* ★ 新規: 戻るボタン (Feature 2, 3) */
+        /* 戻るボタン */
         #btn-back {
-            display: none; /* 通常は非表示 */
+            display: none;
             margin-top: 15px;
             padding: 8px 12px;
             background-color: #6c757d;
@@ -163,9 +163,9 @@
             background-color: #5a6268;
         }
         
-        /* ★ 新規: ライブアラートボタン (Feature 4) */
+        /* ライブアラートボタン */
         #btn-live-alert {
-            display: none; /* 通常は非表示 */
+            display: none;
             position: fixed;
             bottom: 20px;
             left: 20px;
@@ -173,12 +173,12 @@
             background-color: #dc3545;
             color: white;
             border: none;
-            border-radius: 50px; /* 丸いボタン */
+            border-radius: 50px;
             cursor: pointer;
             font-size: 1em;
             font-weight: bold;
             box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-            z-index: 1001; /* 地図より手前 */
+            z-index: 1001;
             animation: pulse 1.5s infinite;
         }
         
@@ -225,8 +225,7 @@
             <div id="recent-info" class="info-section">
                 <h3>待機中</h3>
                 <p>地震・津波情報を待機しています...</p>
-                <p>（直近の地震履歴はここに表示されます）</p>
-                <ul id="recent-list"></ul>
+                <p>（過去30日間の地震履歴を表示します）</p> <ul id="recent-list"></ul>
             </div>
 
             <div class="user-info"></div>
@@ -249,7 +248,6 @@
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             }).addTo(map);
-
             const earthquakeLayer = L.layerGroup().addTo(map);
 
             // --- 2. DOM要素の取得 ---
@@ -257,7 +255,6 @@
             const alertSound = document.getElementById('alert-sound');
             const earthquakeInfoPanel = document.getElementById('earthquake-info');
             const recentInfoPanel = document.getElementById('recent-info');
-            
             const maxIntensityEl = document.getElementById('max-intensity');
             const magnitudeEl = document.getElementById('magnitude');
             const hypocenterEl = document.getElementById('hypocenter');
@@ -267,27 +264,15 @@
             const tsunamiDetailsEl = document.getElementById('tsunami-details');
             const recentListEl = document.getElementById('recent-list');
             const statusMessageEl = document.getElementById('status-message');
-            
-            // ★ 新規: ボタン要素
             const btnBack = document.getElementById('btn-back');
             const btnLiveAlert = document.getElementById('btn-live-alert');
 
             let resetTimer = null;
-
-            // 状態管理
-            let lastNotifiedInfo = {
-                eewId: null,
-                maxScale: 0,
-                tsunamiGrade: 'Safe',
-                isEEWActive: false
-            };
+            let lastNotifiedInfo = { eewId: null, maxScale: 0, tsunamiGrade: 'Safe', isEEWActive: false };
+            let currentLiveEventData = null; 
+            let isLiveEventActive = false; 
+            let eewHistoryCache = []; 
             
-            // ★ 新規: 状態管理
-            let currentLiveEventData = null; // ライブ中のイベント情報を保持 (Feature 4)
-            let isLiveEventActive = false; // ライブイベントが有効か (Feature 3)
-            let eewHistoryCache = []; // EEW履歴のキャッシュ (Feature 6)
-            
-            // ★ 新規: アプリ終了時の時刻を保存 (Feature 5)
             window.addEventListener('beforeunload', () => {
                 localStorage.setItem('lastVisitTime', new Date().toISOString());
             });
@@ -300,15 +285,11 @@
             function connectWebSocket() {
                 console.log('WebSocketに接続試行中...');
                 updateApiStatus('connecting');
-                
                 ws = new WebSocket(wsUrl);
-
                 ws.onopen = async function() {
                     console.log('WebSocket接続成功！');
                     updateApiStatus('connected');
-                    // ★ 変更: 接続時にオフライン通知はしない（起動時(load)に実施）
                 };
-
                 ws.onmessage = function(event) {
                     const data = JSON.parse(event.data);
                     
@@ -321,9 +302,9 @@
                         console.log('EEW取り消し報 受信');
                         showStatusMessage('緊急地震速報は取り消されました。', 'error');
                         lastNotifiedInfo.isEEWActive = false;
-                        isLiveEventActive = false; // ライブ状態解除
+                        isLiveEventActive = false; 
                         currentLiveEventData = null;
-                        hideLiveAlertButton(); // アラートボタンも消す
+                        hideLiveAlertButton(); 
                         setResetTimer();
                         return;
                     }
@@ -336,12 +317,10 @@
                     console.log(`[${data.code}] データ受信:`, data);
                     let infoReceived = false;
                     
-                    // ★ 変更: ライブイベント情報を保持
                     if (data.code === 551 || data.code === 556) {
                         currentLiveEventData = data;
                         isLiveEventActive = true;
                     }
-                    // 津波情報もライブイベントとする
                     if (data.code === 552) {
                          isLiveEventActive = true;
                     }
@@ -356,18 +335,16 @@
                     
                     if (infoReceived) {
                         setResetTimer(); 
-                        showBackButton(); // ★ 新規: ライブ情報受信で戻るボタン表示
-                        hideLiveAlertButton(); // ★ 新規: 詳細表示中はアラートボタンを隠す
+                        showBackButton(); 
+                        hideLiveAlertButton(); 
                     }
                 };
-
                 ws.onclose = function() {
                     console.log('WebSocket接続が切れました。5秒後に再接続します。');
                     updateApiStatus('disconnected');
                     if (resetTimer) clearTimeout(resetTimer); 
                     setTimeout(connectWebSocket, 5000);
                 };
-
                 ws.onerror = function(error) {
                     console.error('WebSocketエラー:', error);
                     updateApiStatus('disconnected');
@@ -381,12 +358,9 @@
                 }
                 resetTimer = setTimeout(() => {
                     console.log('10分間情報更新がなかったため、平常時画面に戻します。');
-                    fetchRecentEarthquakes(); // 履歴一覧に戻す
+                    fetchRecentEarthquakes(); 
                     earthquakeLayer.clearLayers(); 
-                    lastNotifiedInfo = {
-                        eewId: null, maxScale: 0, tsunamiGrade: 'Safe', isEEWActive: false
-                    };
-                    // ★ 新規: 状態リセット
+                    lastNotifiedInfo = { eewId: null, maxScale: 0, tsunamiGrade: 'Safe', isEEWActive: false };
                     currentLiveEventData = null;
                     isLiveEventActive = false;
                     hideBackButton();
@@ -420,10 +394,9 @@
                 }
             }
             
-            // ★ 新規: EEW履歴キャッシュ (Feature 6)
+            // EEW履歴キャッシュ
             async function fetchEEWHistoryCache() {
                 try {
-                    // 90分前までのEEW(556)を50件まで取得
                     const historyUrl = 'https://api.p2pquake.net/v2/history?codes=556&limit=50';
                     const response = await fetch(historyUrl);
                     eewHistoryCache = await response.json();
@@ -433,12 +406,11 @@
                 }
             }
             
-            // ★ 新規: EEW相関チェック (Feature 6)
+            // EEW相関チェック
             function checkEEWCorrelation(quake551) {
                 if (!quake551.earthquake || !quake551.earthquake.originTime || !quake551.earthquake.hypocenter) {
                     return false;
                 }
-                
                 const quakeOriginTime = new Date(quake551.earthquake.originTime).getTime();
                 const quakeHypo = quake551.earthquake.hypocenter.name;
                 
@@ -448,67 +420,95 @@
                     }
                     const eewOriginTime = new Date(eew.earthquake.originTime).getTime();
                     const eewHypo = eew.earthquake.hypocenter.name;
-                    
-                    // 発生時刻が2分以内で、震源地名が一致するものを「相関あり」とみなす
                     const timeDiff = Math.abs(quakeOriginTime - eewOriginTime);
                     return (timeDiff < 120000) && (quakeHypo === eewHypo);
                 });
             }
 
             // --- 5. 平常時の情報取得 (履歴一覧) ---
-            // ★ 変更: クリックイベントと配色 (Feature 1, 6)
+            // ★★★ 変更: 過去1ヶ月でソート ★★★
             async function fetchRecentEarthquakes() {
-                const historyUrl = 'https://api.p2pquake.net/v2/history?codes=551&limit=10';
+                // APIから多めに（50件）取得
+                const historyUrl = 'https://api.p2pquake.net/v2/history?codes=551&limit=50';
                 try {
                     const response = await fetch(historyUrl);
                     const data = await response.json();
                     
-                    recentListEl.innerHTML = '';
-                    if (data && data.length > 0) {
-                        data.forEach(quake => {
-                            if (quake.earthquake) {
-                                const li = document.createElement('li');
-                                const time = new Date(quake.time).toLocaleString('ja-JP');
-                                const hypocenter = quake.earthquake.hypocenter.name;
-                                const maxScale = convertScale(quake.earthquake.maxScale);
-                                li.textContent = `${time} | ${hypocenter} | 最大震度 ${maxScale || '不明'}`;
-                                
-                                // ★ 新規: 配色 (Feature 6)
-                                const hasTsunami = quake.earthquake?.tsunami?.grade && quake.earthquake.tsunami.grade !== 'None';
-                                const hasEEW = checkEEWCorrelation(quake);
-                                
-                                if (hasEEW && hasTsunami) {
-                                    li.className = 'list-purple';
-                                } else if (hasEEW) {
-                                    li.className = 'list-red';
-                                } else if (hasTsunami) {
-                                    li.className = 'list-blue';
-                                }
+                    if (!data || data.length === 0) {
+                         recentListEl.innerHTML = '<li>履歴がありません</li>';
+                         return;
+                    }
 
-                                // ★ 新規: クリックで詳細表示 (Feature 1)
-                                li.addEventListener('click', () => {
-                                    if (handleEarthquakeInfo(quake)) {
-                                        showBackButton(); // 戻るボタン表示
-                                        isLiveEventActive = false; // 履歴クリックはライブではない
-                                    }
-                                });
-                                
-                                recentListEl.appendChild(li);
+                    // 1. 過去1ヶ月（30日）でフィルタリング
+                    const now = new Date();
+                    const oneMonthAgo = now.getTime() - (30 * 24 * 60 * 60 * 1000);
+                    
+                    const filteredData = data.filter(quake => {
+                        if (!quake.earthquake) return false;
+                        const quakeTime = new Date(quake.time).getTime();
+                        return quakeTime > oneMonthAgo;
+                    });
+                    
+                    if (filteredData.length === 0) {
+                         recentListEl.innerHTML = '<li>過去30日間の地震情報はありません</li>';
+                         return;
+                    }
+
+                    // 2. 「一番大きかった」（最大震度）順に並べ替え
+                    // maxScaleが大きい順。同じ場合はマグニチュードが大きい順
+                    filteredData.sort((a, b) => {
+                        const scaleA = a.earthquake.maxScale || 0;
+                        const scaleB = b.earthquake.maxScale || 0;
+                        
+                        if (scaleB !== scaleA) {
+                            return scaleB - scaleA; // 震度で比較
+                        }
+                        
+                        // 震度が同じならマグニチュードで比較
+                        const magA = a.earthquake.hypocenter?.magnitude || 0;
+                        const magB = b.earthquake.hypocenter?.magnitude || 0;
+                        return magB - magA;
+                    });
+
+                    // 3. リストを構築
+                    recentListEl.innerHTML = '';
+                    filteredData.forEach(quake => {
+                        const li = document.createElement('li');
+                        const time = new Date(quake.time).toLocaleString('ja-JP');
+                        const hypocenter = quake.earthquake.hypocenter.name;
+                        const maxScale = convertScale(quake.earthquake.maxScale);
+                        li.textContent = `${time} | ${hypocenter} | 最大震度 ${maxScale || '不明'}`;
+                        
+                        const hasTsunami = quake.earthquake?.tsunami?.grade && quake.earthquake.tsunami.grade !== 'None';
+                        const hasEEW = checkEEWCorrelation(quake);
+                        
+                        if (hasEEW && hasTsunami) li.className = 'list-purple';
+                        else if (hasEEW) li.className = 'list-red';
+                        else if (hasTsunami) li.className = 'list-blue';
+
+                        li.addEventListener('click', () => {
+                            if (handleEarthquakeInfo(quake)) {
+                                showBackButton(); 
+                                isLiveEventActive = false; 
                             }
                         });
-                    }
+                        
+                        recentListEl.appendChild(li);
+                    });
+                    
                     earthquakeInfoPanel.style.display = 'none';
                     recentInfoPanel.style.display = 'block';
-                    hideBackButton(); // リスト表示時は戻るボタンを隠す
+                    hideBackButton(); 
                     
                 } catch (err) {
                     console.error('地震履歴の取得に失敗:', err);
                     recentListEl.textContent = '履歴の取得に失敗しました。';
                 }
             }
+            // ★★★ 変更ここまで ★★★
 
             // --- 6. データ処理関数 ---
-            // [551] 地震情報 (変更なし)
+            // [551] 地震情報
             function handleEarthquakeInfo(data) {
                 console.log('地震情報処理:', data);
                 const eq = data.earthquake;
@@ -556,7 +556,6 @@
                     });
                 }
                 
-                // ★ 変更: 津波情報も同時に表示
                 const tsunamiGrade = eq.tsunami?.grade || 'None';
                 updateTsunamiDisplay(tsunamiGrade);
                 
@@ -582,7 +581,7 @@
                 return true;
             }
             
-            // ★ 新規: 津波表示を共通化
+            // 津波表示を共通化
             function updateTsunamiDisplay(grade, areas = []) {
                  tsunamiWarningEl.innerHTML = '';
                  tsunamiDetailsEl.innerHTML = '';
@@ -614,10 +613,8 @@
             // [552] 津波予報
             function handleTsunamiInfo(data) {
                 console.log('津波情報処理:', data);
-
                 earthquakeInfoPanel.style.display = 'block';
                 recentInfoPanel.style.display = 'none';
-                
                 let highestGrade = 'Safe';
                 let notificationTitle = '津波情報';
                 let notificationBody = '津波情報が更新されました。';
@@ -637,9 +634,7 @@
                         else if (area.grade === 'Warning' && highestGrade !== 'MajorWarning') highestGrade = 'Warning';
                         else if (area.grade === 'Advisory' && highestGrade === 'Safe') highestGrade = 'Advisory';
                     });
-                    
                     updateTsunamiDisplay(highestGrade, data.areas);
-
                     if (highestGrade === 'MajorWarning') {
                         notificationTitle = '【大津波警報】';
                         notificationBody = '大津波警報が発表されました。直ちに避難！';
@@ -651,19 +646,16 @@
                         notificationBody = '津波注意報が発表されました。海岸に近づかないでください。';
                     }
                 }
-
                 if (lastNotifiedInfo.tsunamiGrade !== highestGrade) {
                     sendNotification(notificationTitle, notificationBody);
                     lastNotifiedInfo.tsunamiGrade = highestGrade;
                 }
-                
                 return true;
             }
             
             // [556] 緊急地震速報（警報）
             function handleEEW(data) {
                 console.log('EEW(警報)処理:', data);
-
                 if (!data.report_id || !data.time) {
                     console.warn('[556] 必須データ(id or time)が欠落。スキップ:', data);
                     return false;
@@ -677,40 +669,26 @@
                      console.warn('[556] 時間以外の主要情報がすべて不明のためスキップ:', data);
                      return false;
                 }
-
                 earthquakeInfoPanel.style.display = 'block';
                 recentInfoPanel.style.display = 'none';
                 intensityDetailsEl.innerHTML = `<li>緊急地震速報(警報) 第${data.report_num || '？'}報 受信中...</li>`;
-                
                 maxIntensityEl.textContent = maxScaleEEW > 0 ? `最大震度 ${convertScale(maxScaleEEW)} (予測)` : '最大震度 不明 (予測)';
                 magnitudeEl.textContent = data.earthquake?.magnitude || '---';
                 hypocenterEl.textContent = data.earthquake?.hypocenter?.name || '---';
                 earthquakeTimeEl.textContent = new Date(data.time).toLocaleString('ja-JP');
-
-                // ★ 変更: 津波表示を共通化
                 updateTsunamiDisplay(tsunamiInfo);
-
                 earthquakeLayer.clearLayers();
                 if (data.earthquake?.hypocenter && data.earthquake.hypocenter.latitude) {
                     const lat = data.earthquake.hypocenter.latitude;
                     const lon = data.earthquake.hypocenter.longitude;
-                    
                     L.marker([lat, lon], {
-                        icon: L.divIcon({
-                            className: 'hypocenter-icon',
-                            html: '🚨',
-                            iconSize: [24, 24],
-                            iconAnchor: [12, 12]
-                        })
+                        icon: L.divIcon({ className: 'hypocenter-icon', html: '🚨', iconSize: [24, 24], iconAnchor: [12, 12] })
                     }).addTo(earthquakeLayer)
-                        .bindPopup(`[緊急地震速報]<br>震源地(予測): ${data.earthquake.hypocenter.name}`)
-                        .openPopup();
-                    
+                      .bindPopup(`[緊急地震速報]<br>震源地(予測): ${data.earthquake.hypocenter.name}`)
+                      .openPopup();
                     map.setView([lat, lon], 7);
                 }
-
                 lastNotifiedInfo.isEEWActive = true;
-                
                 if (lastNotifiedInfo.eewId !== data.report_id) {
                     console.log('新規EEW発令');
                     sendNotification(
@@ -720,7 +698,6 @@
                     lastNotifiedInfo.eewId = data.report_id;
                     lastNotifiedInfo.maxScale = maxScaleEEW;
                     lastNotifiedInfo.tsunamiGrade = tsunamiInfo || 'Safe';
-                
                 } else {
                     let updateMessage = '';
                     if (lastNotifiedInfo.maxScale < maxScaleEEW) {
@@ -736,59 +713,37 @@
                         sendNotification(`【EEW更新】第${data.report_num}報`, updateMessage);
                     }
                 }
-                
                 return true;
             }
 
 
             // --- 7. ヘルパー関数 (震度変換) ---
-            const scaleMap = {
-                10: '1', 20: '2', 30: '3', 40: '4', 
-                45: '5弱', 50: '5強', 55: '6弱', 60: '6強', 70: '7'
-            };
+            const scaleMap = { 10: '1', 20: '2', 30: '3', 40: '4', 45: '5弱', 50: '5強', 55: '6弱', 60: '6強', 70: '7' };
             function convertScale(scale) {
                 if (!scale || scale <= 0) return '---';
                 return scaleMap[scale] || '不明';
             }
             function getIntensityClass(scale) {
-                const classMap = {
-                    10: 'intensity-1', 20: 'intensity-2', 30: 'intensity-3', 40: 'intensity-4',
-                    45: 'intensity-5-weak', 50: 'intensity-5-strong',
-                    55: 'intensity-6-weak', 60: 'intensity-6-strong',
-                    70: 'intensity-7'
-                };
+                const classMap = { 10: 'intensity-1', 20: 'intensity-2', 30: 'intensity-3', 40: 'intensity-4', 45: 'intensity-5-weak', 50: 'intensity-5-strong', 55: 'intensity-6-weak', 60: 'intensity-6-strong', 70: 'intensity-7' };
                 return classMap[scale] || '';
             }
             function convertScaleText(scale) {
                 if (!scale || scale <= 0) return '---';
-                 const textMap = {
-                    10: '震度1', 20: '震度2', 30: '震度3', 40: '震度4',
-                    45: '震度5弱', 50: '震度5強', 55: '震度6弱', 60: '6強', 70: '震度7'
-                };
+                 const textMap = { 10: '震度1', 20: '震度2', 30: '震度3', 40: '震度4', 45: '震度5弱', 50: '震度5強', 55: '震度6弱', 60: '6強', 70: '震度7' };
                 return textMap[scale] || '不明';
             }
 
             // --- 8. 通知関数 ---
             function sendNotification(title, body, tag = 'earthquake-info') {
                 console.log(`通知実行: ${title} - ${body}`);
-                
                 if (Notification.permission === 'granted') {
-                    const options = {
-                        body: body,
-                        icon: 'https://cdn-icons-png.flaticon.com/128/1042/1042813.png',
-                        tag: tag 
-                    };
+                    const options = { body: body, icon: 'https://cdn-icons-png.flaticon.com/128/1042/1042813.png', tag: tag };
                     new Notification(title, options);
                 }
-                
-                // ライブアラート時のみ音を鳴らす
                 if (tag === 'earthquake-info') {
-                    alertSound.play().catch(e => {
-                        console.warn('音声再生がブラウザにブロックされました。');
-                    });
+                    alertSound.play().catch(e => { console.warn('音声再生がブラウザにブロックされました。'); });
                 }
             }
-
             function requestNotificationPermission() {
                 if ('Notification' in window) {
                      Notification.requestPermission().then(permission => {
@@ -797,7 +752,6 @@
                     });
                 }
             }
-            
             document.body.addEventListener('click', () => {
                 alertSound.play().catch(() => {});
                 alertSound.pause();
@@ -806,64 +760,44 @@
             }, { once: true });
 
 
-            // --- 9. ★ 新規: ボタン関連の関数 (Feature 2, 3, 4) ---
-            function showBackButton() {
-                btnBack.style.display = 'block';
-            }
-            function hideBackButton() {
-                btnBack.style.display = 'none';
-            }
-            function showLiveAlertButton() {
-                btnLiveAlert.style.display = 'block';
-            }
-            function hideLiveAlertButton() {
-                btnLiveAlert.style.display = 'none';
-            }
+            // --- 9. ボタン関連の関数 ---
+            function showBackButton() { btnBack.style.display = 'block'; }
+            function hideBackButton() { btnBack.style.display = 'none'; }
+            function showLiveAlertButton() { btnLiveAlert.style.display = 'block'; }
+            function hideLiveAlertButton() { btnLiveAlert.style.display = 'none'; }
             
-            // 戻るボタンが押された時
             btnBack.addEventListener('click', () => {
-                fetchRecentEarthquakes(); // 履歴一覧を表示
+                fetchRecentEarthquakes(); 
                 hideBackButton();
-                
                 if (isLiveEventActive && currentLiveEventData) {
-                    showLiveAlertButton(); // ライブ中ならアラートボタン表示
+                    showLiveAlertButton(); 
                 }
             });
             
-            // 地震発令中ボタンが押された時
             btnLiveAlert.addEventListener('click', () => {
                 if (!currentLiveEventData) return;
-                
-                // 保持していたライブ情報を再表示
-                if (currentLiveEventData.code === 551) {
-                    handleEarthquakeInfo(currentLiveEventData);
-                } else if (currentLiveEventData.code === 556) {
-                    handleEEW(currentLiveEventData);
-                }
-                
+                if (currentLiveEventData.code === 551) handleEarthquakeInfo(currentLiveEventData);
+                else if (currentLiveEventData.code === 556) handleEEW(currentLiveEventData);
                 hideLiveAlertButton();
                 showBackButton();
             });
 
 
-            // --- 10. ★ 新規: 起動時のチェック (Feature 5 & 4) ---
+            // --- 10. 起動時のチェック ---
             
-            // 起動時オフラインチェック (Feature 5)
+            // 起動時オフラインチェック (タブを閉じていた間)
             async function checkOfflineQuakesOnLoad() {
                 const lastVisit = localStorage.getItem('lastVisitTime');
                 if (!lastVisit) {
                     console.log('初回訪問のため、オフラインチェックをスキップします。');
                     return;
                 }
-                
                 const lastVisitTime = new Date(lastVisit);
                 console.log(`アプリ前回終了時刻: ${lastVisitTime.toLocaleString()}`);
-
                 try {
                     const historyUrl = `https://api.p2pquake.net/v2/history?codes=551&limit=50`;
                     const response = await fetch(historyUrl);
                     const data = await response.json();
-                    
                     let offlineCount = 0;
                     if (data) {
                         data.forEach(quake => {
@@ -872,14 +806,12 @@
                             }
                         });
                     }
-                    
                     if (offlineCount > 0) {
                          console.log(`オフライン中に ${offlineCount} 件の地震を検出`);
-                         // 起動時の通知は音が鳴らないようにする
                          sendNotification(
                             "アプリ起動",
                             `アプリを閉じていた間に ${offlineCount} 件の地震がありました。`,
-                            'offline-notification' // 別のタグ
+                            'offline-notification'
                          );
                     }
                 } catch (err) {
@@ -887,18 +819,15 @@
                 }
             }
             
-            // 起動時 詳細表示チェック (前回の Feature 4)
+            // 起動時 詳細表示チェック (10分以内/90分以内)
             async function checkRecentActivityOnLoad() {
                 const now = new Date();
                 const TEN_MINUTES = 10 * 60 * 1000;
                 const NINETY_MINUTES = 90 * 60 * 1000;
-
                 try {
-                    // 優先度1: 10分以内の地震(551)
                     console.log('起動時チェック1: 10分以内の地震(551)');
                     const quakeRes = await fetch('https://api.p2pquake.net/v2/history?codes=551&limit=1');
                     const quakeData = await quakeRes.json();
-                    
                     if (quakeData && quakeData.length > 0) {
                         const latestQuake = quakeData[0];
                         const quakeTime = new Date(latestQuake.time);
@@ -906,17 +835,14 @@
                             console.log('10分以内の地震を発見。詳細表示します。');
                             if (handleEarthquakeInfo(latestQuake)) {
                                 setResetTimer(); 
-                                showBackButton(); // ★ 戻るボタン表示
+                                showBackButton(); 
                                 return true; 
                             }
                         }
                     }
-
-                    // 優先度2: 1.5時間(90分)以内のEEW(556)
                     console.log('起動時チェック2: 90分以内のEEW(556)');
                     const eewRes = await fetch('https://api.p2pquake.net/v2/history?codes=556&limit=1');
                     const eewData = await eewRes.json();
-
                     if (eewData && eewData.length > 0) {
                         const latestEEW = eewData[0];
                         const eewTime = new Date(latestEEW.time);
@@ -924,28 +850,24 @@
                             console.log('90分以内のEEWを発見。詳細表示します。');
                             if (handleEEW(latestEEW)) {
                                 setResetTimer();
-                                showBackButton(); // ★ 戻るボタン表示
+                                showBackButton(); 
                                 return true;
                             }
                         }
                     }
-                    
                 } catch (err) {
                     console.error('起動時の履歴チェックに失敗:', err);
                 }
-                
                 console.log('起動時チェック: 詳細表示する情報なし。');
                 return false;
             }
 
 
             // --- 11. 初期接続開始 ---
-            
             await fetchEEWHistoryCache();     // 1. EEW履歴を読み込む (リスト配色用)
             await checkOfflineQuakesOnLoad(); // 2. オフライン通知 (タブを閉じていた間の)
             
-            // 3. 起動時詳細表示チェック
-            const didShowDetails = await checkRecentActivityOnLoad();
+            const didShowDetails = await checkRecentActivityOnLoad(); // 3. 起動時詳細表示チェック
             if (!didShowDetails) {
                 fetchRecentEarthquakes();     // 4. (詳細表示しないなら) 履歴一覧を表示
             }
